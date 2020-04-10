@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/QIUJIANJUNN/bitfinex-api-node-lend#readme",
   "dependencies": {
-    "bitfinex-api-node": "^2.0.8",
+    "bitfinex-api-node": "file:modules/bitfinex-api-node",
     "cli-table2": "^0.2.0",
     "crypto": "^1.0.1"
   }

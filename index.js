@@ -15,8 +15,8 @@ const bfxRest2 = bfx.rest(2, { transform: true });
 const bfxRest1 = bfx.rest(1, { transform: true });
 
 const offer_minimum = 50.0;
-const offer_currency = 'BTC';
-const lending_start_date = '2019-09-10'
+const offer_currency = 'USD';
+const lending_start_date = '2020-04-06'
 
 // Get funding Wallets balance,okay
 function get_funding_balance(currency) {
@@ -85,8 +85,11 @@ function check_target_currency_all_funding_loans_amount(offer_currency) {
   return new Promise(function(resolve, reject) {
     check_target_currency_all_funding_loans(offer_currency).then(r => {
       let amountTotal = 0;
-      for (let i = 0; i < r.amount.length; i++) {
-        amountTotal += r.amount[i];
+      if (r != 0)
+      {
+        for (let i = 0; i < r.amount.length; i++) {
+          amountTotal += r.amount[i];
+        }
       }
       resolve(amountTotal);
     });
@@ -216,13 +219,16 @@ function check_total_income(offer_currency, lending_start_date) {
     return bfxRest1.balance_history(offer_currency, {}, (err, res) => {
       if (err) console.log(err);
       let ob = [];
-      for (let i = 0; i < res.length; i++) {
-        const timestamp1000 = Number(res[i].timestamp) * 1000;
-        if (
-          timestamp1000 > lending_start_date_t &&
-          res[i].description == "Margin Funding Payment on wallet deposit"
-        ) {
-          ob.push(res[i]);
+      if (res)
+      {
+        for (let i = 0; i < res.length; i++) {
+          const timestamp1000 = Number(res[i].timestamp) * 1000;
+          if (
+            timestamp1000 > lending_start_date_t &&
+            res[i].description == "Margin Funding Payment on wallet deposit"
+          ) {
+            ob.push(res[i]);
+          }
         }
       }
       resolve(ob);
@@ -232,7 +238,6 @@ function check_total_income(offer_currency, lending_start_date) {
 
 // Renders an overview.
 const render_overview = async offer_currency => {
-  console.clear();
   const ba = await checkIfPoss(offer_currency);
   let remaining_balance = 0;
 
@@ -310,52 +315,48 @@ const render_overview = async offer_currency => {
     offer_currency,
     lending_start_date
   );
-  if (total_income.length == 0) {
-    return false;
-  }
   const t2 = new Table({
-    head: ["Currency", "Total", "昨日收益", "累计收益", "累计USD收益"]
+    head: ["Currency", "Total", "昨日收益", "累積收益", "累積USD收益"]
   });
-  let cumulative_income = 0;
-  if (total_income.length == 1) {
-    cumulative_income = total_income[0].amount;
+  if (total_income.length != 0) {
+    let cumulative_income = 0;
+    if (total_income.length == 1) {
+      cumulative_income = total_income[0].amount;
+    }
+    if (total_income.length > 1) {
+      const len = total_income.length - 1;
+      cumulative_income = total_income[0].balance - total_income[len].balance;
+      cumulative_income = cumulative_income.toFixed(8);
+    }
+
+    let price = await check_price(offer_currency);
+    let usd_valuation = cumulative_income * Number(price.last_price);
+    usd_valuation = usd_valuation.toFixed(2);
+
+    t2.push([
+      total_income[0].currency,
+      total_income[0].balance,
+      total_income[0].amount,
+      cumulative_income,
+      usd_valuation
+    ]);
   }
-  if (total_income.length > 1) {
-    const len = total_income.length - 1;
-    cumulative_income = total_income[0].balance - total_income[len].balance;
-    cumulative_income = cumulative_income.toFixed(8);
-  }
-
-  let price = await check_price(offer_currency);
-  let usd_valuation = cumulative_income * Number(price.last_price);
-  usd_valuation = usd_valuation.toFixed(2);
-
-  t2.push([
-    total_income[0].currency,
-    total_income[0].balance,
-    total_income[0].amount,
-    cumulative_income,
-    usd_valuation
-  ]);
-
   const renderString = `
-" ————————————————————————— XiaoJi BITFINEX LENDING BOT ————————————————————————— "
+—————————————— Stupid Bitfinex Lending BOT ——————————————
 
-" ———————————————————————————————— 已提供 ————————————————————————————————— "
+——————————————————— 已提供 ———————————————————
 ${t.toString()}
 
-
-" ———————————————————————————————— 掛單中 ————————————————————————————————— "
+——————————————————— 掛單中 ———————————————————
 ${funding_offers === 0 ? "No funding loans" : t1.toString()}
 
-
-" ———————————————————————————————— 剩餘數量 ————————————————————————————————— "
+——————————————————— 剩餘數量 ——————————————————
 ${remaining_balance}
 
-
-" ———————————————————————————————— 累積收益 ————————————————————————————————— "
+——————————————————— 累積收益 ——————————————————
 ${t2.toString()}
 `;
+  console.clear();
   console.log(renderString);
 };
 
