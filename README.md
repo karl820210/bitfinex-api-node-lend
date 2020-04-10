@@ -20,17 +20,10 @@ BTC
 <br>
 
 ## 使用方法
-### 1. 添加 API Key
-#### 將index.js 的
+### 1. 填入個人的 API Key 至 ./config/apiKey.js
 ```JavaScript
-const apiKey = require("./config/apiKey").apiKey;
-const apiSecret = require("./config/apiKey").apiSecret;
-```
-
-#### 更改為
-```JavaScript
-const apiKey = 'xxxxxxxxxxxxxxxxxxx';
-const apiSecret = 'xxxxxxxxxxxxxxxxxxx';
+exports.apiKey = "XXX";
+exports.apiSecret = "XXX";
 ```
 
 ### 2. 設定收益計算起使日
@@ -43,6 +36,3 @@ const lending_start_date = '2019-09-10'
 ```JavaScript
 node index.js
 ```
-
-
-
