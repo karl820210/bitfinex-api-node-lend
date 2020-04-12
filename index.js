@@ -2,6 +2,7 @@ const apiKey = require("./config/apiKey").apiKey;
 const apiSecret = require("./config/apiKey").apiSecret;
 const BFX = require("bitfinex-api-node");
 const Table = require("cli-table2");
+const History = require("./history");
 const bfx = new BFX({
     apiKey: apiKey,
     apiSecret: apiSecret,
@@ -18,9 +19,12 @@ const bfxRest1 = bfx.rest(1, {
     transform: true
 });
 
+const history = new History(bfxRest2);
+
 const offer_minimum = 50.0;
 const offer_currency = 'USD';
 const lending_start_date = '2020-04-06'
+
 
 // Get funding Wallets balance,okay
 function get_funding_balance(currency) {
@@ -169,30 +173,6 @@ function get_funding_book(currency, limit_asks, limit_bids) {
         });
     });
 }
-
-const match_sort = null
-const match_records = 5
-const match_period = 300 //second
-// Get funding matched
-function get_funding_matched(currency) {
-    let match_end = Date.now(); // ms
-    let match_start = match_end - match_period * 1000;
-    return bfxRest2.trades("f" + currency, match_start, match_end, match_records, match_sort).then(records => {
-        let data = {
-            amount: [],
-            period: [],
-            rate: []
-        };
-        for (let i = 0; i < records.length; i++) {
-            data.amount[i] = records[i].amount;
-            data.period[i] = records[i].period;
-            data.rate[i] = records[i].rate;
-        }
-        return data;
-    });
-}
-
-
 
 // funding credits
 function offer_a_funding(currency, amount, rate, period, direction, cb) {
@@ -379,7 +359,7 @@ const render_overview = async offer_currency => {
     const table_offers = await gen_table_offers(offer_currency);
     const table_income = await gen_table_income(offer_currency, lending_start_date);
 
-    let funding_matched = await get_funding_matched(offer_currency);
+    let funding_matched = await history.GetFundingMatched(offer_currency);
     let daliyRate = 0;
     let yearRate = 0;
     if (funding_matched.rate.length > 0) {
