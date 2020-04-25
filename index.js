@@ -1,8 +1,13 @@
 const apiKey = require("./config/apiKey").apiKey;
 const apiSecret = require("./config/apiKey").apiSecret;
+const affCode = require("./config/apiKey").affCode;
 const BFX = require("bitfinex-api-node");
+const {
+    FundingOffer
+} = require("bfx-api-node-models");
 const Table = require("cli-table2");
-const History = require("./history");
+const History = require("./history").History;
+const Rate = require("./history").Rate;
 const bfx = new BFX({
     apiKey: apiKey,
     apiSecret: apiSecret,
@@ -13,19 +18,30 @@ const bfx = new BFX({
     }
 });
 const bfxRest2 = bfx.rest(2, {
+    affCode: affCode,
     transform: true
 });
 const bfxRest1 = bfx.rest(1, {
     transform: true
 });
 
-const history = new History(bfxRest2);
-
-const offer_minimum = 50.0;
+const lending_start_date = '2020-04-06';
+const offer_minimum = 50;
 const offer_currency = 'USD';
-const lending_start_date = '2020-04-06'
+const minDaliyRate = 0.0002;
+const minYearRate = (minDaliyRate * 365 * 100).toFixed(2);
+const max_amount = 100;
+const period = 2;
+let startBookingTime = 0;
+let maxBookingTime = 60 * 1000; // ms
 
-
+const history = new History(bfxRest2, offer_currency);
+const offerHistory = {
+    date: [],
+    amount: [],
+    period: [],
+    rate: []
+};
 // Get funding Wallets balance,okay
 function get_funding_balance(currency) {
     const currencyUpper = currency.toUpperCase();
@@ -112,6 +128,7 @@ function check_funding_offers(currency) {
             return 0;
         }
         let data = {
+            id: [],
             mtsCreate: [],
             mtsUpdate: [],
             amount: [],
@@ -120,6 +137,7 @@ function check_funding_offers(currency) {
             period: []
         };
         for (let i = 0; i < res.length; i++) {
+            data.id[i] = res[i].id;
             data.mtsCreate[i] = timestamp_to_time(res[i].mtsCreate);
             data.mtsUpdate[i] = timestamp_to_time(res[i].mtsUpdate);
             data.amount[i] = res[i].amount;
@@ -175,20 +193,34 @@ function get_funding_book(currency, limit_asks, limit_bids) {
 }
 
 // funding credits
-function offer_a_funding(currency, amount, rate, period, direction, cb) {
-    return new Promise(function(resolve, reject) {
-        return bfxRest1.new_offer(
-            currency,
-            amount,
-            rate,
-            period,
-            direction,
-            (err, res) => {
-                if (err) console.log(err);
-                resolve(res);
-            }
-        );
+function offer_a_funding(currency, amount, rate, period) {
+    offerHistory.date.push(new Date().toLocaleString());
+    offerHistory.amount.push(amount);
+    offerHistory.rate.push(rate);
+    offerHistory.period.push(period);
+    let offer = new FundingOffer({
+        type: "LIMIT",
+        symbol: "f" + currency,
+        amount: String(amount),
+        rate: String(rate),
+        period: period,
+        flags: 0
     });
+    return bfxRest2.submitFundingOffer(offer).then(res => {
+        return res;
+    });
+}
+
+// cancel offers
+const cancelOffers = async (currency, minRate) => {
+    let offers = await check_funding_offers(offer_currency);
+    if (offers != 0) {
+        for (let i = 0; i < offers.id.length; i++) {
+            if (offers.rate[i] > minRate) {
+                await bfxRest2.cancelFundingOffer(offers.id[i]);
+            }
+        }
+    }
 }
 
 // check_price
@@ -244,6 +276,7 @@ function check_total_income(offer_currency, lending_start_date) {
     });
 }
 
+//已提供
 const gen_table_loaning = async offer_currency => {
     const table = new Table({
         head: ["Opening", "Currency", "Amount", "Rate", "Period", "LastPayout"],
@@ -252,13 +285,11 @@ const gen_table_loaning = async offer_currency => {
     let funding_loaning = await check_target_currency_all_funding_loans(offer_currency);
     if (funding_loaning != 0) {
         for (let i = 0; i < funding_loaning.amount.length; i++) {
-            let funding_loaning_rate365 = funding_loaning.rate[i] * 365;
-            funding_loaning_rate365 = funding_loaning_rate365.toFixed(4) * 100 + "%";
             table.push([
                 funding_loaning.mtsCreate[i],
                 funding_loaning.symbol[i],
                 funding_loaning.amount[i],
-                funding_loaning_rate365,
+                new Rate(funding_loaning.rate[i]).GetPCTLog(),
                 funding_loaning.period[i],
                 funding_loaning.mtsUpdate[i]
             ]);
@@ -267,6 +298,7 @@ const gen_table_loaning = async offer_currency => {
     return table;
 }
 
+//掛單中
 const gen_table_offers = async offer_currency => {
     const table = new Table({
         head: ["Opening", "Currency", "Amount", "Rate", "Period", "LastPayout"]
@@ -279,7 +311,7 @@ const gen_table_offers = async offer_currency => {
                 funding_offers.mtsCreate[i],
                 funding_offers.symbol[i],
                 funding_offers.amount[i],
-                funding_offers.rate[i],
+                new Rate(funding_offers.rate[i]).GetPCTLog(),
                 funding_offers.period[i],
                 funding_offers.mtsUpdate[i]
             ]);
@@ -288,9 +320,26 @@ const gen_table_offers = async offer_currency => {
     return table;
 }
 
+//掛單歷史
+function gen_table_offerHistory() {
+    const table = new Table({
+        head: ["Date", "Amount", "Rate", "Period"]
+    });
+
+    for (let i = 0; i < offerHistory.date.length; i++) {
+        table.push([
+            offerHistory.date[i],
+            offerHistory.amount[i],
+            new Rate(offerHistory.rate[i]).GetPCTLog(),
+            offerHistory.period[i]
+        ]);
+    }
+    return table;
+}
+
 const gen_table_income = async (offer_currency, start_data) => {
     const table = new Table({
-        head: ["Currency", "Total", "昨日收益", "累積收益", "累積USD收益"]
+        head: ["Currency", "Total", "昨日收益", "累積收益", "累積USD收益", "Yrate"]
     });
     let total_income = await check_total_income(offer_currency, start_data);
     if (total_income.length != 0) {
@@ -304,16 +353,24 @@ const gen_table_income = async (offer_currency, start_data) => {
             cumulative_income = cumulative_income.toFixed(8);
         }
 
+        const timeSec = 1000;
+        const timeMin = timeSec * 60;
+        const timeHour = timeMin * 60;
+        const timeDay = timeHour * 24;
+        const time30Day = timeDay * 30;
+        const timeYear = timeDay * 365;
         let price = await check_price(offer_currency);
         let usd_valuation = cumulative_income * Number(price.last_price);
         usd_valuation = usd_valuation.toFixed(2);
-
+        const lending_t = timeYear / (new Date(start_data).getTime() - new Date().getTime());
+        let yRate = -100 * lending_t * cumulative_income / (total_income[0].balance - cumulative_income)
         table.push([
             total_income[0].currency,
             total_income[0].balance,
             total_income[0].amount,
             cumulative_income,
-            usd_valuation
+            usd_valuation,
+            yRate.toFixed(3)
         ]);
     }
     return table;
@@ -321,45 +378,64 @@ const gen_table_income = async (offer_currency, start_data) => {
 
 // Renders an overview.
 const render_overview = async offer_currency => {
+    // cancel booking
+    if (startBookingTime != 0 && (new Date() - startBookingTime) > maxBookingTime) {
+        await cancelOffers(offer_currency, minDaliyRate);
+    }
+
     const ba = await checkIfPoss(offer_currency);
     let remaining_balance = 0;
 
+    let funding_matched = await history.GetFundingMatched();
     if (typeof ba === "number") {
+        let daliyRate = 0;
+        if (funding_matched.rate.length > 0)
+            daliyRate = funding_matched.rate[0];
+
+        let funding_r = Math.max(daliyRate, Math.max(history.m2m.avg.value, history.m6m.avg.value));
+        let funding_a = max_amount;
+        let funding_p = period;
+        /*
         const funding_book = await get_funding_book(offer_currency, 1, 1);
-        let funding_r = "";
-        let funding_a = "";
-        let funding_p = "";
         let funding_book_asks_rate_range = funding_book.asks[0].rate * 1.2;
         if (funding_book.bids[0].rate < funding_book_asks_rate_range) {
-            funding_r = funding_book.asks[0].rate;
+            funding_r = funding_book.asks[0].rate / 365;
             funding_a = funding_book.asks[0].amount;
             funding_p = funding_book.asks[0].period;
         } else {
-            funding_r = funding_book.bids[0].rate;
+            funding_r = funding_book.bids[0].rate / 365;
             funding_a = funding_book.bids[0].amount;
             funding_p = funding_book.bids[0].period;
         }
+        */
         let check_amount = "";
         if (funding_a < ba) {
-            check_amount = String(funding_a);
+            check_amount = funding_a;
         } else {
-            check_amount = String(ba);
+            check_amount = ba;
         }
+        if (Number(funding_r) < minDaliyRate)
+            funding_r = minDaliyRate;
+        if (Number(check_amount) > max_amount)
+            check_amount = max_amount;
         await offer_a_funding(
             offer_currency,
             check_amount,
             funding_r,
-            funding_p,
-            "lend"
+            period
         );
+        startBookingTime = new Date();
     } else {
         remaining_balance = ba.balance;
     }
     const table_loaning = await gen_table_loaning(offer_currency);
     const table_offers = await gen_table_offers(offer_currency);
+    const table_offerHistory = gen_table_offerHistory();
     const table_income = await gen_table_income(offer_currency, lending_start_date);
 
-    let funding_matched = await history.GetFundingMatched(offer_currency);
+    if (table_offers.length === 0 && typeof ba != "number")
+        startBookingTime = 0;
+
     let daliyRate = 0;
     let yearRate = 0;
     if (funding_matched.rate.length > 0) {
@@ -373,14 +449,27 @@ const render_overview = async offer_currency => {
 —————————————— Stupid Bitfinex Lending BOT ——————————————
 
 ————————————————— ${date.toLocaleString()} ————————————————
-————————————————— 即時年利率 ${yearRate + "%"} —————————————————
-————————————————— 日利率 ${daliyRate + "%"} ——————————————————
+
+————————————— 限制最小利率年 ${minYearRate + "%"} — 日 ${(minDaliyRate * 100).toFixed(4) + "%"} ————————————
+—————————————— 即時利率年 ${yearRate + "%"} — 日 ${daliyRate + "%"} —————————————
+
+${history.m2m.GetLog(" 2m")}
+${history.m6m.GetLog(" 6m")}
+${history.m10m.GetLog("10m")}
+${history.m30m.GetLog("30m")}
+${history.m1h.GetLog(" 1h")}
+${history.m3h.GetLog(" 3h")}
+${history.m6h.GetLog(" 6h")}
+${history.m12h.GetLog("12h")}
+${history.m24h.GetLog("24h")}
 
 ——————————————————— 已提供 ———————————————————
 ${table_loaning.toString()}
 
 ——————————————————— 掛單中 ———————————————————
-${table_offers.length === 0 ? "No funding loans" : table_offers.toString()}
+${table_offers.length === 0 ? "無" : table_offers.toString()}
+——————————————————— 掛單歷史 ——————————————————
+${table_offerHistory.toString()}
 
 ——————————————————— 剩餘數量 ——————————————————
 ${remaining_balance}
@@ -392,6 +481,13 @@ ${table_income.toString()}
     console.log(renderString);
 };
 
-setInterval(function() {
+history.Update(true).then(() => {
     render_overview(offer_currency);
-}, 10000);
+
+    setInterval(function() {
+        render_overview(offer_currency);
+    }, 10000);
+    setInterval(function() {
+        history.Update();
+    }, 10000);
+});
