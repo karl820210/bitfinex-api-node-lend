@@ -28,10 +28,10 @@ const bfxRest1 = bfx.rest(1, {
 const lending_start_date = '2020-04-06';
 const offer_minimum = 50;
 const offer_currency = 'USD';
-const minDaliyRate = 0.0002;
-const minYearRate = (minDaliyRate * 365 * 100).toFixed(2);
+const period = [2, 15, 30];
+const minDaliyRate = [0.00020, 0.0007, 0.001];
+const minYearRate = (minDaliyRate[0] * 365 * 100).toFixed(2);
 const max_amount = 100;
-const period = 2;
 let startBookingTime = 0;
 let maxBookingTime = 60 * 1000; // ms
 
@@ -380,7 +380,7 @@ const gen_table_income = async (offer_currency, start_data) => {
 const render_overview = async offer_currency => {
     // cancel booking
     if (startBookingTime != 0 && (new Date() - startBookingTime) > maxBookingTime) {
-        await cancelOffers(offer_currency, minDaliyRate);
+        await cancelOffers(offer_currency, minDaliyRate[0]);
     }
 
     const ba = await checkIfPoss(offer_currency);
@@ -394,35 +394,28 @@ const render_overview = async offer_currency => {
 
         let funding_r = Math.max(daliyRate, Math.max(history.m2m.avg.value, history.m6m.avg.value));
         let funding_a = max_amount;
-        let funding_p = period;
-        /*
-        const funding_book = await get_funding_book(offer_currency, 1, 1);
-        let funding_book_asks_rate_range = funding_book.asks[0].rate * 1.2;
-        if (funding_book.bids[0].rate < funding_book_asks_rate_range) {
-            funding_r = funding_book.asks[0].rate / 365;
-            funding_a = funding_book.asks[0].amount;
-            funding_p = funding_book.asks[0].period;
-        } else {
-            funding_r = funding_book.bids[0].rate / 365;
-            funding_a = funding_book.bids[0].amount;
-            funding_p = funding_book.bids[0].period;
-        }
-        */
+        let funding_p = period[0];
+
         let check_amount = "";
         if (funding_a < ba) {
             check_amount = funding_a;
         } else {
             check_amount = ba;
         }
-        if (Number(funding_r) < minDaliyRate)
-            funding_r = minDaliyRate;
+        if (Number(funding_r) < minDaliyRate[0])
+            funding_r = minDaliyRate[0];
+        tPeriod = period[0];
+        if (Number(funding_r) >= minDaliyRate[1])
+            tPeriod = period[1];
+        else if (Number(funding_r) >= minDaliyRate[2])
+            tPeriod = period[2];
         if (Number(check_amount) > max_amount)
             check_amount = max_amount;
         await offer_a_funding(
             offer_currency,
             check_amount,
             funding_r,
-            period
+            tPeriod
         );
         startBookingTime = new Date();
     } else {
@@ -449,8 +442,8 @@ const render_overview = async offer_currency => {
 —————————————— Stupid Bitfinex Lending BOT ——————————————
 
 ————————————————— ${date.toLocaleString()} ————————————————
-
-————————————— 限制最小利率年 ${minYearRate + "%"} — 日 ${(minDaliyRate * 100).toFixed(4) + "%"} ————————————
+————————————— 負數：掛貸出成交，正數：掛貸入成交 —————————————
+————————————— 限制最小利率年 ${minYearRate + "%"} — 日 ${(minDaliyRate[0] * 100).toFixed(4) + "%"} ————————————
 —————————————— 即時利率年 ${yearRate + "%"} — 日 ${daliyRate + "%"} —————————————
 
 ${history.m2m.GetLog(" 2m")}
@@ -482,6 +475,9 @@ ${table_income.toString()}
 };
 
 history.Update(true).then(() => {
+    table_offers = gen_table_offers(offer_currency);
+    if (table_offers.length != 0)
+        startBookingTime = new Date();
     render_overview(offer_currency);
 
     setInterval(function() {

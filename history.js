@@ -20,18 +20,26 @@ function TimeModMin(date) {
     return TimeMod(date, timeMin);
 }
 
-function Rate(value) {
+function Rate(value, amount = 0) {
     this.value = value;
+    this.amount = amount;
 
+    //percentage of day
     this.PCTD = function() {
         return (this.value * 100).toFixed(4);
     }
+
+    //percentage of year
     this.PCTY = function() {
         return (this.PCTD() * 365).toFixed(2);
     }
 
     this.GetPCTLog = function() {
-        let str = `${this.PCTY() + "%"}(${this.PCTD() + "%"})`;
+        let str = '';
+        if (this.amount != 0)
+            str = `${this.PCTY() + "%"}(${this.PCTD() + "%"})[${this.amount.toFixed(2)}]`;
+        else
+            str = `${this.PCTY() + "%"}(${this.PCTD() + "%"})`;
         return str;
     }
 }
@@ -65,11 +73,20 @@ function Match(period) {
 
             this.count += match.count;
             this.avg.value += match.avg.value * match.count;
-            this.max.value = Math.max(this.max.value, match.max.value);
-            this.min.value = Math.min(this.min.value, match.min.value);
+            this.avg.amount += match.avg.amount * match.count;
+            if (this.max.value < match.max.value) {
+                this.max.value = match.max.value;
+                this.max.amount = match.max.amount;
+            }
+            if (this.min.value > match.min.value) {
+                this.min.value = match.min.value;
+                this.min.amount = match.min.amount;
+            }
         }
-        if (this.count != 0)
+        if (this.count != 0) {
             this.avg.value /= this.count;
+            this.avg.amount /= this.count;
+        }
     }
 
     this.GetLog = function(prefix) {
@@ -151,8 +168,10 @@ function History(bfxRest2, currency) {
                         break;
                     }
                     if (records[i].mts <= match.timeStart) {
-                        if (match.count != 0)
+                        if (match.count != 0) {
                             match.avg.value /= match.count;
+                            match.avg.amount /= match.count;
+                        }
                         this.matches.enqueue(match);
                         //console.log(match.timeStart + ": avg " + match.avg + " count " + match.count);
                         match = new Match();
@@ -163,14 +182,23 @@ function History(bfxRest2, currency) {
                     }
                     match.count++;
                     match.avg.value += records[i].rate;
-                    match.max.value = Math.max(match.max.value, records[i].rate);
-                    match.min.value = Math.min(match.min.value, records[i].rate);
+                    match.avg.amount += Math.abs(records[i].amount);
+                    if (match.max.value < records[i].rate) {
+                        match.max.value = records[i].rate;
+                        match.max.amount = records[i].amount;
+                    }
+                    if (match.min.value > records[i].rate) {
+                        match.min.value = records[i].rate;
+                        match.min.amount = records[i].amount;
+                    }
                 }
 
                 //last one
                 if (match_end <= match_start) {
-                    if (match.count != 0)
+                    if (match.count != 0) {
                         match.avg.value /= match.count;
+                        match.avg.amount /= match.count;
+                    }
                     this.matches.enqueue(match);
                     break;
                 }
